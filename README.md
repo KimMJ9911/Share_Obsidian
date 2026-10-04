@@ -13,7 +13,11 @@
 - 태그를 떼거나 vault에서 노트를 지우면 레포에서도 자동 제거 (매니페스트 기반 동기화)
 - vault별로 브랜치를 분리해서 여러 vault를 하나의 레포로 관리 가능
 - 레포 → vault 역방향 가져오기 지원 (다른 기기에서 이어서 작업)
-- Windows용 단일 exe로 빌드 가능 (PyInstaller)
+- Windows용 단일 exe, macOS용 .app/.dmg로 빌드 가능 (PyInstaller)
+
+## 다운로드
+
+빌드 없이 바로 쓰고 싶다면 [Releases](https://github.com/KimMJ9911/Share_Obsidian/releases)에서 macOS용 `.dmg`를 받으세요.
 
 ## 요구 사항
 
@@ -64,6 +68,13 @@ branch: "personal-vault"
 build_exe.bat
 ```
 `dist\ObsidianShare.exe`가 생성됩니다. exe를 어디로 옮기든 같은 폴더에 `config.yaml`을 함께 두면 자동으로 불러옵니다.
+
+## macOS 앱/dmg 빌드
+
+```bash
+./build_macos.sh
+```
+`dist/ObsidianShare.app`과 `ObsidianShare.dmg`가 생성됩니다. 미서명(unsigned) 빌드라 처음 열 때 우클릭 → "열기"로 Gatekeeper 경고를 한 번 통과해야 합니다. `.app`을 어디로 옮기든 같은 폴더에 `config.yaml`을 함께 두면 자동으로 불러옵니다.
 
 ## 설정 항목
 
