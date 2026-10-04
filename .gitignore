@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+config.yaml
+dist/
+build/
+*.spec
+.omc/

@@ -1,0 +1,36 @@
+# obsidian_share 설정 예시
+# 실제 사용 전 이 파일을 config.yaml 로 복사해서 값을 채우세요.
+#
+# Windows 경로 주의: YAML은 백슬래시(\)를 이스케이프 문자로 해석하므로
+# "C:\Users\me\vault" 대신 "C:/Users/me/vault" 처럼 슬래시(/)를 쓰세요.
+
+# 옵시디언 vault 루트 경로
+vault_path: "/Users/kimmj/Desktop/WORK"
+
+# 공유용으로 미리 git clone 해둔 GitHub 레포의 로컬 경로
+# 여러 vault를 같은 레포로 공유하려면 repo_path는 그대로 두고
+# 아래 branch 값만 vault별로 다르게 설정한 config 파일을 각각 만드세요.
+# 예: config-work.yaml (branch: work-vault), config-personal.yaml (branch: personal-vault)
+repo_path: "/Users/kimmj/Desktop/MyPublicNotes"
+
+# 이 vault를 전용으로 동기화할 브랜치 이름
+# - 로컬/원격에 이미 있으면 체크아웃만 함
+# - 없으면 현재 커밋에서 새로 만들어서 체크아웃
+# - 비워두면(null) 브랜치 전환 없이 repo_path가 현재 있는 브랜치를 그대로 사용
+branch: "work-vault"
+
+# 이 프론트매터 키가 true인 노트만 공유 대상 (예: share: true)
+share_key: "share"
+
+# true면 폴더 구조 무시하고 레포 최상단(또는 target_subdir)에 파일명만으로 평탄화
+# 같은 이름의 파일이 서로 다른 폴더에 있으면 에러 발생
+flatten: false
+
+# 레포 안에서 노트를 넣을 하위 폴더 (레포 루트에 바로 넣으려면 "")
+target_subdir: "notes"
+
+# 커밋 메시지 템플릿, {count}는 변경된 파일 수로 치환됨
+commit_message: "Update shared notes ({count} changed)"
+
+# true면 커밋 후 자동으로 git push까지 실행
+auto_push: true
