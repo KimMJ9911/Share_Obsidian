@@ -1,5 +1,6 @@
 # Share Obsidian
 
+**Obsidian 문서를 깃허브로 공유/관리하기 편하게 하기 위한 프로그램입니다. python으로 간단하게 만들어본 프로그램입니다.**
 개인 Obsidian vault에서 `share: true`로 표시한 노트만 골라 GitHub 레포로 동기화하는 작은 도구입니다. CLI와 Tkinter GUI를 둘 다 제공합니다.
 
 ![GUI demo](docs/screenshot.png)
