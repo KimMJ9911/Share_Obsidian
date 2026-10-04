@@ -2,6 +2,8 @@
 
 개인 Obsidian vault에서 `share: true`로 표시한 노트만 골라 GitHub 레포로 동기화하는 작은 도구입니다. CLI와 Tkinter GUI를 둘 다 제공합니다.
 
+![GUI demo](docs/screenshot.png)
+
 ## 특징
 
 - 프론트매터 `share: true` 태그가 붙은 노트만 선택적으로 공유
@@ -21,7 +23,7 @@
 ## 사용법
 
 1. GitHub에 공유용 레포를 만들고 로컬에 `git clone`
-2. `config.example.yaml`을 `config.yaml`로 복사한 뒤 `vault_path`, `repo_path` 등을 채움
+2. `config.example.yml`을 `config.yaml`로 복사한 뒤 `vault_path`, `repo_path` 등을 채움
    (Windows 경로는 `C:/Users/me/vault`처럼 슬래시를 사용하세요)
 3. 공유하고 싶은 노트의 프론트매터에 태그 추가:
    ```yaml
@@ -64,7 +66,7 @@ build_exe.bat
 
 ## 설정 항목
 
-`config.example.yaml`에 각 항목에 대한 설명이 주석으로 달려 있습니다.
+`config.example.yml`에 각 항목에 대한 설명이 주석으로 달려 있습니다.
 
 | 키 | 설명 |
 |---|---|
