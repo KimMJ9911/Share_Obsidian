@@ -22,6 +22,7 @@ from obsidian_share import (
     load_config,
     pull_into_vault,
     pull_latest,
+    save_config,
     sync,
 )
 
@@ -75,12 +76,30 @@ class ObsidianShareGUI:
             side="left", padx=(4, 0)
         )
 
-        info_frame = ttk.Frame(self.root)
-        info_frame.pack(fill="x", **pad)
-        self.vault_label = ttk.Label(info_frame, text="vault: -")
-        self.vault_label.pack(anchor="w")
-        self.repo_label = ttk.Label(info_frame, text="repo: -")
-        self.repo_label.pack(anchor="w")
+        vault_frame = ttk.Frame(self.root)
+        vault_frame.pack(fill="x", **pad)
+        ttk.Label(vault_frame, text="Vault 경로").pack(side="left")
+        self.vault_path_var = tk.StringVar()
+        ttk.Entry(vault_frame, textvariable=self.vault_path_var, width=50).pack(
+            side="left", padx=4, fill="x", expand=True
+        )
+        ttk.Button(
+            vault_frame, text="찾아보기", command=self.on_browse_vault
+        ).pack(side="left")
+
+        repo_frame = ttk.Frame(self.root)
+        repo_frame.pack(fill="x", **pad)
+        ttk.Label(repo_frame, text="Repo 경로").pack(side="left")
+        self.repo_path_var = tk.StringVar()
+        ttk.Entry(repo_frame, textvariable=self.repo_path_var, width=50).pack(
+            side="left", padx=4, fill="x", expand=True
+        )
+        ttk.Button(
+            repo_frame, text="찾아보기", command=self.on_browse_repo
+        ).pack(side="left")
+        ttk.Button(
+            repo_frame, text="설정 저장", command=self.on_save_config
+        ).pack(side="left", padx=(4, 0))
 
         branch_frame = ttk.Frame(self.root)
         branch_frame.pack(fill="x", **pad)
@@ -168,9 +187,66 @@ class ObsidianShareGUI:
             messagebox.showerror("오류", "설정 파일을 불러오지 못했습니다. 로그를 확인하세요.")
             return
         self.cfg = cfg
-        self.vault_label.configure(text=f"vault: {cfg['vault_path']}")
-        self.repo_label.configure(text=f"repo: {cfg['repo_path']}")
+        self.vault_path_var.set(str(cfg["vault_path"]))
+        self.repo_path_var.set(str(cfg["repo_path"]))
         self.refresh_branches()
+
+    def on_browse_vault(self):
+        path = filedialog.askdirectory(title="Vault 폴더 선택")
+        if path:
+            self.vault_path_var.set(path)
+
+    def on_browse_repo(self):
+        path = filedialog.askdirectory(title="Repo 폴더 선택 (git clone 해둔 폴더)")
+        if path:
+            self.repo_path_var.set(path)
+
+    def _sync_cfg_from_fields(self):
+        """Vault/Repo 입력 필드의 값을 현재 cfg에 즉시 반영 (저장 여부와 무관하게 동작에 적용)."""
+        vault_path = self.vault_path_var.get().strip()
+        repo_path = self.repo_path_var.get().strip()
+        if not vault_path or not repo_path:
+            return False
+        if self.cfg is None:
+            self.cfg = {
+                "share_key": "share",
+                "flatten": False,
+                "target_subdir": "",
+                "commit_message": "Update shared notes ({count} changed)",
+                "auto_push": True,
+                "branch": None,
+            }
+        self.cfg["vault_path"] = Path(vault_path).expanduser()
+        self.cfg["repo_path"] = Path(repo_path).expanduser()
+        return True
+
+    def on_save_config(self):
+        if not self._sync_cfg_from_fields():
+            messagebox.showwarning("알림", "Vault 경로와 Repo 경로를 모두 입력하세요.")
+            return
+
+        branch = self.branch_var.get().strip()
+        self.cfg["branch"] = branch or None
+
+        path_str = self.config_path_var.get().strip()
+        if not path_str:
+            path_str = filedialog.asksaveasfilename(
+                title="설정 저장 위치",
+                defaultextension=".yaml",
+                filetypes=[("YAML", "*.yaml *.yml")],
+                initialfile="config.yaml",
+            )
+            if not path_str:
+                return
+            self.config_path_var.set(path_str)
+
+        ok, _, out = self.run_captured(save_config, self.cfg, Path(path_str))
+        self.log(out)
+        if ok:
+            messagebox.showinfo("저장 완료", f"{path_str}에 저장했습니다.")
+            self.refresh_branches()
+        else:
+            messagebox.showerror("오류", "설정 저장에 실패했습니다. 로그를 확인하세요.")
 
     # ---------- branches ----------
 
@@ -207,8 +283,8 @@ class ObsidianShareGUI:
     # ---------- load branch locally ----------
 
     def on_load_branch(self):
-        if not self.cfg:
-            messagebox.showwarning("알림", "먼저 설정 파일을 불러오세요.")
+        if not self._sync_cfg_from_fields():
+            messagebox.showwarning("알림", "Vault 경로와 Repo 경로를 모두 입력하세요.")
             return
         branch = self.branch_var.get().strip()
         if not branch:
@@ -246,8 +322,8 @@ class ObsidianShareGUI:
     # ---------- upload ----------
 
     def on_upload(self):
-        if not self.cfg:
-            messagebox.showwarning("알림", "먼저 설정 파일을 불러오세요.")
+        if not self._sync_cfg_from_fields():
+            messagebox.showwarning("알림", "Vault 경로와 Repo 경로를 모두 입력하세요.")
             return
         branch = self.branch_var.get().strip()
         if not branch:

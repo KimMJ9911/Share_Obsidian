@@ -36,6 +36,27 @@ def load_config(path: Path) -> dict:
     return cfg
 
 
+def save_config(cfg: dict, path: Path) -> None:
+    """GUI 등에서 수정한 설정을 YAML 파일로 다시 저장."""
+    data = {
+        "vault_path": str(cfg["vault_path"]),
+        "repo_path": str(cfg["repo_path"]),
+        "branch": cfg.get("branch"),
+        "share_key": cfg.get("share_key", "share"),
+        "flatten": cfg.get("flatten", False),
+        "target_subdir": cfg.get("target_subdir", ""),
+        "commit_message": cfg.get(
+            "commit_message", "Update shared notes ({count} changed)"
+        ),
+        "auto_push": cfg.get("auto_push", True),
+    }
+    path.write_text(
+        yaml.safe_dump(data, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+    print(f"설정을 저장했습니다: {path}")
+
+
 def parse_frontmatter(text: str) -> dict:
     if not text.startswith("---"):
         return {}
