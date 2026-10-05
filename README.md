@@ -18,6 +18,7 @@
 ## 다운로드
 
 빌드 없이 바로 쓰고 싶다면 [Releases](https://github.com/KimMJ9911/Share_Obsidian/releases)에서 macOS용 `.dmg`를 받으세요.
+Window 용은 빌드가 필요합니다.
 
 ## 요구 사항
 
