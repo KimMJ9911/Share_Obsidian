@@ -7,11 +7,21 @@
 # 옵시디언 vault 루트 경로
 vault_path: "/Users/kimmj/Desktop/WORK"
 
-# 공유용으로 미리 git clone 해둔 GitHub 레포의 로컬 경로
+# 공유용 GitHub 레포의 로컬 경로
 # 여러 vault를 같은 레포로 공유하려면 repo_path는 그대로 두고
 # 아래 branch 값만 vault별로 다르게 설정한 config 파일을 각각 만드세요.
 # 예: config-work.yaml (branch: work-vault), config-personal.yaml (branch: personal-vault)
 repo_path: "/Users/kimmj/Desktop/MyPublicNotes"
+
+# repo_path가 아직 없으면(처음 설정할 때) 이 URL로 자동 git clone 합니다.
+# repo_path가 이미 존재하면 이 값은 무시됩니다.
+repo_url: "https://github.com/owner/MyPublicNotes.git"
+
+# 비공개 레포를 clone/pull/push 하려면 GitHub Personal Access Token(PAT)이 필요합니다.
+# GitHub > Settings > Developer settings > Personal access tokens 에서 발급
+# (repo 권한만 있으면 됨). 공개 레포면 비워둬도 됩니다.
+# 이 파일은 git으로 관리/공유하지 마세요 (토큰이 평문으로 저장됩니다).
+github_token: ""
 
 # 이 vault를 전용으로 동기화할 브랜치 이름
 # - 로컬/원격에 이미 있으면 체크아웃만 함

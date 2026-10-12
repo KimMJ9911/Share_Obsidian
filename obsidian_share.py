@@ -2,6 +2,7 @@
 """Sync Obsidian notes flagged with `share: true` in frontmatter to a GitHub repo."""
 
 import argparse
+import base64
 import hashlib
 import json
 import re
@@ -25,6 +26,8 @@ def load_config(path: Path) -> dict:
     for key in ("vault_path", "repo_path"):
         if key not in cfg:
             sys.exit(f"설정 파일에 '{key}' 값이 필요합니다.")
+    cfg.setdefault("repo_url", "")
+    cfg.setdefault("github_token", "")
     cfg.setdefault("share_key", "share")
     cfg.setdefault("flatten", False)
     cfg.setdefault("target_subdir", "")
@@ -41,6 +44,8 @@ def save_config(cfg: dict, path: Path) -> None:
     data = {
         "vault_path": str(cfg["vault_path"]),
         "repo_path": str(cfg["repo_path"]),
+        "repo_url": cfg.get("repo_url", ""),
+        "github_token": cfg.get("github_token", ""),
         "branch": cfg.get("branch"),
         "share_key": cfg.get("share_key", "share"),
         "flatten": cfg.get("flatten", False),
@@ -227,18 +232,65 @@ def sync(cfg: dict, dry_run: bool) -> int:
     return changed
 
 
+def scan_repo_notes(cfg: dict) -> dict:
+    """target_subdir 하위의 레포 실제 파일(.md / 이미지)을 직접 스캔해서
+    {vault_relpath(str): repo_relpath(str)} 매핑을 만든다.
+
+    manifest는 sync()가 실행될 때만 갱신되기 때문에, vault를 거치지 않고
+    레포에 직접 추가/커밋된 파일(예: git add -A로 같이 올라간 파일)이 있으면
+    manifest에는 없지만 레포에는 실제로 존재하는 상태가 될 수 있다.
+    flatten=True면 레포 쪽 파일명만으로는 원래 vault 폴더 구조를 복원할 수
+    없어서 이 보강 스캔은 flatten=False일 때만 사용한다.
+    """
+    if cfg.get("flatten"):
+        return {}
+    repo_path = cfg["repo_path"]
+    target_subdir = Path(cfg["target_subdir"]) if cfg["target_subdir"] else Path(".")
+    search_root = repo_path / target_subdir
+    if not search_root.is_dir():
+        return {}
+
+    found = {}
+    for f in search_root.rglob("*"):
+        if not f.is_file():
+            continue
+        repo_rel = f.relative_to(repo_path)
+        if repo_rel.name == MANIFEST_NAME or any(
+            part.startswith(".") for part in repo_rel.parts
+        ):
+            continue
+        ext = f.suffix.lower()
+        if ext == ".md":
+            text = f.read_text(encoding="utf-8", errors="ignore")
+            if not is_shared(parse_frontmatter(text), cfg["share_key"]):
+                continue  # share: true 프런트매터가 없는 .md는 공유 노트가 아님 (예: CLAUDE.md)
+        elif ext not in IMAGE_EXTS:
+            continue
+        vault_rel = f.relative_to(search_root)
+        found[str(vault_rel)] = str(repo_rel)
+    return found
+
+
 def pull_into_vault(cfg: dict) -> int:
-    """레포(manifest에 기록된 파일들)를 vault_path로 복사해온다. 충돌 시 레포 내용으로 덮어씀."""
+    """레포 파일들을 vault_path로 복사해온다. 충돌 시 레포 내용으로 덮어씀.
+
+    manifest에 기록된 매핑에, 레포를 직접 스캔해서 찾은 파일(manifest가
+    최신이 아니어도 실제 레포에 있는 노트/이미지)을 더해서 가져온다."""
     repo_path = cfg["repo_path"]
     vault_path = cfg["vault_path"]
     manifest_path = repo_path / MANIFEST_NAME
-    if not manifest_path.exists():
-        print("레포에 공유 매니페스트가 없어 가져올 파일이 없습니다.")
+
+    mapping = {}
+    if manifest_path.exists():
+        mapping.update(json.loads(manifest_path.read_text(encoding="utf-8")))
+    mapping.update(scan_repo_notes(cfg))
+
+    if not mapping:
+        print("가져올 파일이 없습니다.")
         return 0
 
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     changed = 0
-    for vault_rel, repo_rel in manifest.items():
+    for vault_rel, repo_rel in mapping.items():
         src = repo_path / repo_rel
         dst = vault_path / vault_rel
         if not src.exists():
@@ -255,10 +307,20 @@ def pull_into_vault(cfg: dict) -> int:
     return changed
 
 
-def _run_git_raw(repo_path: Path, args: list) -> subprocess.CompletedProcess:
+def _auth_header_args(token: str) -> list:
+    """GitHub PAT로 HTTPS 인증하기 위한 임시 -c 옵션 (디스크에 저장되지 않음)."""
+    if not token:
+        return []
+    basic = base64.b64encode(f"x-access-token:{token}".encode()).decode()
+    return ["-c", f"http.extraheader=AUTHORIZATION: basic {basic}"]
+
+
+def _run_git_raw(
+    repo_path: Path, args: list, token: str = None
+) -> subprocess.CompletedProcess:
     try:
         return subprocess.run(
-            ["git", *args],
+            ["git", *_auth_header_args(token), *args],
             cwd=repo_path,
             capture_output=True,
             encoding="utf-8",
@@ -271,11 +333,45 @@ def _run_git_raw(repo_path: Path, args: list) -> subprocess.CompletedProcess:
         )
 
 
-def run_git(repo_path: Path, args: list) -> str:
-    result = _run_git_raw(repo_path, args)
+def run_git(repo_path: Path, args: list, token: str = None) -> str:
+    result = _run_git_raw(repo_path, args, token)
     if result.returncode != 0:
         sys.exit(f"git {' '.join(args)} 실패:\n{result.stderr}")
     return result.stdout.strip()
+
+
+def clone_repo(repo_url: str, repo_path: Path, token: str = None) -> None:
+    """repo_url을 repo_path로 clone. repo_path는 아직 없거나 빈 폴더여야 함."""
+    repo_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        result = subprocess.run(
+            ["git", *_auth_header_args(token), "clone", repo_url, str(repo_path)],
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+    except FileNotFoundError:
+        sys.exit(
+            "git 실행 파일을 찾을 수 없습니다. Git이 설치되어 있고 PATH에 등록되어 "
+            "있는지 확인하세요 (Windows: https://git-scm.com/download/win 에서 설치)."
+        )
+    if result.returncode != 0:
+        sys.exit(f"git clone 실패:\n{result.stderr}")
+    print(f"'{repo_url}' -> '{repo_path}' clone 완료.")
+
+
+def ensure_repo(cfg: dict) -> None:
+    """repo_path에 git 레포가 없으면 repo_url(+github_token)로 자동 clone."""
+    repo_path = cfg["repo_path"]
+    if (repo_path / ".git").exists():
+        return
+    repo_url = cfg.get("repo_url")
+    if not repo_url:
+        sys.exit(
+            f"repo_path가 존재하지 않습니다: {repo_path}\n"
+            "자동으로 clone하려면 설정 파일에 'repo_url'을 지정하세요."
+        )
+    clone_repo(repo_url, repo_path, cfg.get("github_token"))
 
 
 def branch_exists_locally(repo_path: Path, branch: str) -> bool:
@@ -285,12 +381,12 @@ def branch_exists_locally(repo_path: Path, branch: str) -> bool:
     return result.returncode == 0
 
 
-def remote_branch_exists(repo_path: Path, branch: str) -> bool:
-    out = run_git(repo_path, ["ls-remote", "--heads", "origin", branch])
+def remote_branch_exists(repo_path: Path, branch: str, token: str = None) -> bool:
+    out = run_git(repo_path, ["ls-remote", "--heads", "origin", branch], token)
     return bool(out.strip())
 
 
-def ensure_branch(repo_path: Path, branch: str) -> None:
+def ensure_branch(repo_path: Path, branch: str, token: str = None) -> None:
     current = run_git(repo_path, ["symbolic-ref", "--short", "HEAD"])
     if current == branch:
         return
@@ -304,8 +400,8 @@ def ensure_branch(repo_path: Path, branch: str) -> None:
 
     if branch_exists_locally(repo_path, branch):
         run_git(repo_path, ["checkout", branch])
-    elif remote_branch_exists(repo_path, branch):
-        run_git(repo_path, ["fetch", "origin", branch])
+    elif remote_branch_exists(repo_path, branch, token):
+        run_git(repo_path, ["fetch", "origin", branch], token)
         run_git(repo_path, ["checkout", "-b", branch, f"origin/{branch}"])
     else:
         print(f"'{branch}' 브랜치가 없어 현재 커밋에서 새로 생성합니다.")
@@ -318,10 +414,10 @@ def current_branch(repo_path: Path) -> str:
     return run_git(repo_path, ["symbolic-ref", "--short", "HEAD"])
 
 
-def list_branches(repo_path: Path, fetch: bool = True) -> list:
+def list_branches(repo_path: Path, fetch: bool = True, token: str = None) -> list:
     """repo_path의 로컬 + 원격(origin) 브랜치 이름 목록 (중복 제거, 정렬)."""
     if fetch:
-        _run_git_raw(repo_path, ["fetch", "origin", "--prune"])
+        _run_git_raw(repo_path, ["fetch", "origin", "--prune"], token)
     local = run_git(repo_path, ["branch", "--format=%(refname:short)"]).splitlines()
     remote_raw = run_git(
         repo_path, ["branch", "-r", "--format=%(refname:short)"]
@@ -334,28 +430,34 @@ def list_branches(repo_path: Path, fetch: bool = True) -> list:
     return sorted({b for b in local + remote if b})
 
 
-def pull_latest(repo_path: Path) -> None:
-    has_upstream = _run_git_raw(
-        repo_path, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"]
-    ).returncode == 0
-    if not has_upstream:
-        print("원격 추적 브랜치가 없어 pull을 건너뜁니다.")
+def pull_latest(repo_path: Path, token: str = None) -> None:
+    """현재 체크아웃된 브랜치를 기준으로 origin에서 직접 fetch + ff merge.
+
+    upstream(추적) 설정 여부에 의존하지 않음 - 로컬 브랜치가 이전에
+    추적 설정 없이 만들어진 경우(@{u} 없음) 'pull'이 조용히 아무 일도
+    하지 않고 넘어가서 vault가 실제로는 최신이 아닌데 "최신 상태"로
+    보이는 문제가 있었음.
+    """
+    branch = current_branch(repo_path)
+    if not remote_branch_exists(repo_path, branch, token):
+        print(f"원격에 '{branch}' 브랜치가 없어 pull을 건너뜁니다.")
         return
-    run_git(repo_path, ["pull", "--ff-only"])
-    print("pull 완료.")
+    run_git(repo_path, ["fetch", "origin", branch], token)
+    run_git(repo_path, ["merge", "--ff-only", f"origin/{branch}"])
+    print(f"'{branch}' pull 완료.")
 
 
-def push_branch(repo_path: Path, branch: str) -> None:
+def push_branch(repo_path: Path, branch: str, token: str = None) -> None:
     if branch:
         has_upstream = _run_git_raw(
             repo_path, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"]
         ).returncode == 0
         if has_upstream:
-            run_git(repo_path, ["push"])
+            run_git(repo_path, ["push"], token)
         else:
-            run_git(repo_path, ["push", "-u", "origin", branch])
+            run_git(repo_path, ["push", "-u", "origin", branch], token)
     else:
-        run_git(repo_path, ["push"])
+        run_git(repo_path, ["push"], token)
 
 
 def cli_confirm(status: str) -> bool:
@@ -383,7 +485,7 @@ def commit_and_push(cfg: dict, changed: int, confirm) -> None:
     print(f"커밋 완료: {message}")
 
     if cfg["auto_push"]:
-        push_branch(repo_path, cfg["branch"])
+        push_branch(repo_path, cfg["branch"], cfg.get("github_token"))
         print("push 완료.")
 
 
@@ -409,11 +511,13 @@ def main():
     args = parser.parse_args()
 
     cfg = load_config(Path(args.config))
+    ensure_repo(cfg)
+    token = cfg.get("github_token")
     if cfg["branch"]:
-        ensure_branch(cfg["repo_path"], cfg["branch"])
+        ensure_branch(cfg["repo_path"], cfg["branch"], token)
 
     if args.pull:
-        pull_latest(cfg["repo_path"])
+        pull_latest(cfg["repo_path"], token)
         changed = pull_into_vault(cfg)
         if changed:
             print(f"{changed}개 파일을 vault로 가져왔습니다.")

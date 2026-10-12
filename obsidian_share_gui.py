@@ -18,6 +18,7 @@ from obsidian_share import (
     commit_and_push,
     current_branch,
     ensure_branch,
+    ensure_repo,
     list_branches,
     load_config,
     pull_into_vault,
@@ -100,6 +101,24 @@ class ObsidianShareGUI:
         ttk.Button(
             repo_frame, text="설정 저장", command=self.on_save_config
         ).pack(side="left", padx=(4, 0))
+
+        github_frame = ttk.Frame(self.root)
+        github_frame.pack(fill="x", **pad)
+        ttk.Label(github_frame, text="GitHub 레포 URL").pack(side="left")
+        self.repo_url_var = tk.StringVar()
+        ttk.Entry(github_frame, textvariable=self.repo_url_var, width=32).pack(
+            side="left", padx=4, fill="x", expand=True
+        )
+        ttk.Label(github_frame, text="Token(PAT)").pack(side="left", padx=(8, 0))
+        self.github_token_var = tk.StringVar()
+        ttk.Entry(
+            github_frame, textvariable=self.github_token_var, width=20, show="*"
+        ).pack(side="left", padx=4)
+        ttk.Label(
+            self.root,
+            text="Repo 경로가 비어 있으면 위 URL(+Token, 비공개 레포일 때만 필요)로 자동 clone합니다.",
+            foreground="gray",
+        ).pack(anchor="w", padx=8)
 
         branch_frame = ttk.Frame(self.root)
         branch_frame.pack(fill="x", **pad)
@@ -189,6 +208,8 @@ class ObsidianShareGUI:
         self.cfg = cfg
         self.vault_path_var.set(str(cfg["vault_path"]))
         self.repo_path_var.set(str(cfg["repo_path"]))
+        self.repo_url_var.set(cfg.get("repo_url", ""))
+        self.github_token_var.set(cfg.get("github_token", ""))
         self.refresh_branches()
 
     def on_browse_vault(self):
@@ -218,6 +239,8 @@ class ObsidianShareGUI:
             }
         self.cfg["vault_path"] = Path(vault_path).expanduser()
         self.cfg["repo_path"] = Path(repo_path).expanduser()
+        self.cfg["repo_url"] = self.repo_url_var.get().strip()
+        self.cfg["github_token"] = self.github_token_var.get().strip()
         return True
 
     def on_save_config(self):
@@ -256,13 +279,21 @@ class ObsidianShareGUI:
         self.set_busy(True, "브랜치 목록 불러오는 중...")
 
         def worker():
-            ok, branches, out = self.run_captured(list_branches, self.cfg["repo_path"])
-            cur = None
+            ok, _, out = self.run_captured(ensure_repo, self.cfg)
+            branches, cur = [], None
             if ok:
-                ok2, cur, out2 = self.run_captured(
-                    current_branch, self.cfg["repo_path"]
+                ok, branches, out2 = self.run_captured(
+                    list_branches,
+                    self.cfg["repo_path"],
+                    True,
+                    self.cfg.get("github_token"),
                 )
                 out += out2
+            if ok:
+                ok2, cur, out3 = self.run_captured(
+                    current_branch, self.cfg["repo_path"]
+                )
+                out += out3
             self._callback_queue.put(
                 lambda: self._on_branches_loaded(ok, branches, out, cur)
             )
@@ -294,15 +325,21 @@ class ObsidianShareGUI:
         self.set_busy(True, f"'{branch}' 브랜치 불러오는 중...")
 
         def worker():
-            ok, _, out = self.run_captured(
-                ensure_branch, self.cfg["repo_path"], branch
-            )
+            token = self.cfg.get("github_token")
+            ok, _, out = self.run_captured(ensure_repo, self.cfg)
             if ok:
-                ok, _, out2 = self.run_captured(pull_latest, self.cfg["repo_path"])
+                ok, _, out2 = self.run_captured(
+                    ensure_branch, self.cfg["repo_path"], branch, token
+                )
                 out += out2
             if ok:
-                ok, _, out3 = self.run_captured(pull_into_vault, self.cfg)
+                ok, _, out3 = self.run_captured(
+                    pull_latest, self.cfg["repo_path"], token
+                )
                 out += out3
+            if ok:
+                ok, _, out4 = self.run_captured(pull_into_vault, self.cfg)
+                out += out4
             self._callback_queue.put(
                 lambda: self._on_load_branch_done(ok, out, branch)
             )
@@ -334,7 +371,18 @@ class ObsidianShareGUI:
         self.set_busy(True, "변경 사항 확인 중...")
         self.root.update_idletasks()
 
-        ok, _, out = self.run_captured(ensure_branch, self.cfg["repo_path"], branch)
+        token = self.cfg.get("github_token")
+
+        ok, _, out = self.run_captured(ensure_repo, self.cfg)
+        self.log(out)
+        if not ok:
+            self.set_busy(False)
+            messagebox.showerror("오류", "레포 준비(clone)에 실패했습니다. 로그를 확인하세요.")
+            return
+
+        ok, _, out = self.run_captured(
+            ensure_branch, self.cfg["repo_path"], branch, token
+        )
         self.log(out)
         if not ok:
             self.set_busy(False)
