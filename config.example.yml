@@ -37,7 +37,10 @@ share_key: "share"
 flatten: false
 
 # 레포 안에서 노트를 넣을 하위 폴더 (레포 루트에 바로 넣으려면 "")
-target_subdir: "notes"
+# 다른 기기와 같은 레포/브랜치를 공유한다면, 그 기기의 config.yaml과
+# 반드시 같은 값을 써야 합니다. 값이 다르면 서로 다른 폴더를 보게 되어
+# 상대가 올린 파일을 못 찾는 문제가 생깁니다.
+target_subdir: ""
 
 # 커밋 메시지 템플릿, {count}는 변경된 파일 수로 치환됨
 commit_message: "Update shared notes ({count} changed)"

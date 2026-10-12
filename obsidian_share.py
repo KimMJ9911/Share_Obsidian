@@ -248,6 +248,12 @@ def scan_repo_notes(cfg: dict) -> dict:
     target_subdir = Path(cfg["target_subdir"]) if cfg["target_subdir"] else Path(".")
     search_root = repo_path / target_subdir
     if not search_root.is_dir():
+        if cfg["target_subdir"]:
+            print(
+                f"[경고] target_subdir='{cfg['target_subdir']}' 폴더가 레포에 없습니다 "
+                f"({search_root}). 이 레포/브랜치를 공유하는 다른 기기의 config.yaml과 "
+                "target_subdir 값이 같은지 확인하세요."
+            )
         return {}
 
     found = {}
